@@ -1,4 +1,5 @@
-use std::process;
+use std::io;
+use std::fs::File;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -12,10 +13,9 @@ struct CLI {
     file_path: String,
 }
 
-fn main() {
+fn main() -> Result<(), io::Error>{
     let args = CLI::from_args();
-    if let Err(e) = rhtail::tail(args.file_path, args.lines) {
-        eprintln!("Error: {e}");
-        process::exit(1);
-    }
+    let mut file = File::open(args.file_path)?;
+    rhtail::tail(&mut file, &mut io::stdout(), args.lines)?;
+    Ok(())
 }

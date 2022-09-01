@@ -1,27 +1,32 @@
-use std::fs::File;
-use std::io::{self, Read, Write, Seek};
+use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::cmp;
 
 const BUFFER_SIZE: usize = 1024;
 
-pub fn tail(path: String, lines: u64) -> Result<(), io::Error> {
-    let mut file = File::open(path)?;
-    let (start_offset, end_offset) = rfind_count(&mut file, b'\n', lines, true)?;
-    print_file(&mut file, start_offset + 1, end_offset)?;
+pub fn tail<R, W>(input: &mut R, output: &mut W, lines: u64) -> Result<(), io::Error>
+where
+    R: Read + Seek,
+    W: Write,
+{
+    let (start_offset, end_offset) = rfind_count(input, b'\n', lines, true)?;
+    print_file(input, output, start_offset + 1, end_offset)?;
     Ok(())
 }
 
-fn rfind_count(f: &mut File, byte: u8, count: u64, ignore_last: bool) -> Result<(u64, u64), io::Error> {
+fn rfind_count<R>(input: &mut R, byte: u8, count: u64, ignore_last: bool) -> Result<(u64, u64), io::Error>
+where
+    R: Read + Seek,
+{
     let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-    let file_size = f.metadata()?.len();
+    let input_size = input.seek(SeekFrom::End(0))?;
 
-    let mut start_offset = file_size;
+    let mut start_offset = input_size;
     let mut end_offset;
     let mut counter = 0;
     loop {
         end_offset = start_offset;
         if end_offset == 0 {
-            return Ok((0, file_size));
+            return Ok((0, input_size));
         }
 
         let buf_size;
@@ -33,29 +38,33 @@ fn rfind_count(f: &mut File, byte: u8, count: u64, ignore_last: bool) -> Result<
             buf_size = BUFFER_SIZE;
         }
 
-        f.seek(io::SeekFrom::Start(start_offset))?;
-        f.read_exact(&mut buffer[..buf_size])?;
+        input.seek(SeekFrom::Start(start_offset))?;
+        input.read_exact(&mut buffer[..buf_size])?;
 
         for i in (0..buf_size - 1).rev() {
-            if buffer[i] == byte && (!ignore_last || end_offset != file_size || i != buf_size - 1){
+            if buffer[i] == byte && (!ignore_last || end_offset != input_size || i != buf_size - 1){
                 counter += 1;
                 if counter == count {
-                    return Ok((start_offset + i as u64, file_size));
+                    return Ok((start_offset + i as u64, input_size));
                 }
             }
         }
     }
 }
 
-fn print_file(f: &mut File, offset: u64, end: u64) -> Result<(), io::Error> {
+fn print_file<R, W>(input: &mut R, output: &mut W, offset: u64, end: u64) -> Result<(), io::Error>
+where
+    R: Read + Seek,
+    W: Write,
+{
     let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-    f.seek(io::SeekFrom::Start(offset))?;
+    input.seek(SeekFrom::Start(offset))?;
 
     let mut current_offset = offset;
     while current_offset < end {
         let buf_size = cmp::min(BUFFER_SIZE, (end - current_offset) as usize);
-        f.read_exact(&mut buffer[..buf_size])?;
-        io::stdout().write_all(&buffer[..buf_size])?;
+        input.read_exact(&mut buffer[..buf_size])?;
+        output.write_all(&buffer[..buf_size])?;
         current_offset += buf_size as u64;
     }
 
