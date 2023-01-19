@@ -1,5 +1,6 @@
 use std::io::{self, Read, Write, Seek, SeekFrom};
 use std::cmp;
+use std::fs::File;
 
 const BUFFER_SIZE: usize = 1024;
 
@@ -69,6 +70,22 @@ where
     }
 
     Ok(())
+}
+
+pub fn follow_file<W>(input_file: &mut File, output: &mut W) -> Result<(), io::Error>
+where
+    W: Write
+{
+    let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+    let mut buf_size;
+
+    // Naive implementation: busy waiting
+    loop {
+        buf_size = input_file.read(&mut buffer)?;
+        if buf_size > 0 && buf_size <= buffer.len() {
+            output.write_all(&buffer[..buf_size])?;
+        }
+    }
 }
 
 #[cfg(test)]

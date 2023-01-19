@@ -11,11 +11,17 @@ struct CLI {
     lines: u64,
 
     file_path: String,
+
+    #[structopt(short, long)]
+    follow: bool,
 }
 
 fn main() -> Result<(), io::Error>{
     let args = CLI::from_args();
     let mut file = File::open(args.file_path)?;
     rhtail::tail(&mut file, &mut io::stdout(), args.lines)?;
+    if args.follow {
+        rhtail::follow_file(&mut file, &mut io::stdout())?;
+    }
     Ok(())
 }

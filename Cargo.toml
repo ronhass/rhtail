@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 tempfile = "3.3.0"
-structopt="0.3.26"
+structopt = "0.3.26"
 
