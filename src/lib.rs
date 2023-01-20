@@ -10,45 +10,82 @@ where
     W: Write,
 {
     let (start_offset, end_offset) = rfind_count(input, b'\n', lines, true)?;
-    print_file(input, output, start_offset + 1, end_offset)?;
+    let start_offset = match start_offset {
+        None => 0,
+        Some(n) => n + 1,
+    };
+    print_file(input, output, start_offset, end_offset)?;
     Ok(())
 }
 
-fn rfind_count<R>(input: &mut R, byte: u8, count: u64, ignore_last: bool) -> Result<(u64, u64), io::Error>
+struct RevReader<R> {
+    inner: R,
+    inner_offset: u64,
+    buffer: [u8; BUFFER_SIZE],
+    buffer_offset: u64,
+    size: u64,
+}
+
+impl<R: Read + Seek> RevReader<R> {
+    fn new(inner: R) -> Result<RevReader<R>, io::Error> {
+        let mut r = RevReader {
+            inner,
+            inner_offset: 0,
+            buffer: [0; BUFFER_SIZE],
+            buffer_offset: 0,
+            size: 0
+        };
+        r.size = r.inner.seek(SeekFrom::End(0))?;
+        r.inner_offset = r.size;
+        Ok(r)
+    }
+
+    fn read_byte(&mut self) -> Result<Option<u8>, io::Error> {
+        if self.buffer_offset == 0 {
+            if self.inner_offset == 0 {
+                return Ok(None);
+            }
+            let _buffer_offset = cmp::min(BUFFER_SIZE as u64, self.inner_offset);
+            let _inner_offset = self.inner_offset - _buffer_offset;
+
+            self.inner.seek(SeekFrom::Start(_inner_offset))?;
+            self.inner_offset = _inner_offset;
+
+            self.inner.read_exact(&mut self.buffer[0.._buffer_offset as usize])?;
+            self.buffer_offset = _buffer_offset;
+        }
+        self.buffer_offset -= 1;
+        Ok(Some(self.buffer[self.buffer_offset as usize]))
+    }
+
+    fn offset(&self) -> u64 {
+        return self.inner_offset + self.buffer_offset;
+    }
+}
+
+fn rfind_count<R>(input: &mut R, byte: u8, count: u64, ignore_last: bool) -> Result<(Option<u64>, u64), io::Error>
 where
     R: Read + Seek,
 {
-    let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-    let input_size = input.seek(SeekFrom::End(0))?;
-
-    let mut start_offset = input_size;
-    let mut end_offset;
+    let mut rev_reader = RevReader::new(input)?;
+    let input_size = rev_reader.size;
     let mut counter = 0;
+
+    if ignore_last {
+        if rev_reader.read_byte()? == None {
+            return Ok((None, input_size));
+        }
+    }
+
     loop {
-        end_offset = start_offset;
-        if end_offset == 0 {
-            return Ok((0, input_size));
+        match rev_reader.read_byte()? {
+            None => return Ok((None, input_size)),
+            Some(c) if c == byte => counter += 1,
+            _ => (),
         }
-
-        let buf_size;
-        if end_offset < BUFFER_SIZE as u64 {
-            start_offset = 0;
-            buf_size = end_offset as usize;
-        } else {
-            start_offset = end_offset - BUFFER_SIZE as u64;
-            buf_size = BUFFER_SIZE;
-        }
-
-        input.seek(SeekFrom::Start(start_offset))?;
-        input.read_exact(&mut buffer[..buf_size])?;
-
-        for i in (0..buf_size - 1).rev() {
-            if buffer[i] == byte && (!ignore_last || end_offset != input_size || i != buf_size - 1){
-                counter += 1;
-                if counter == count {
-                    return Ok((start_offset + i as u64, input_size));
-                }
-            }
+        
+        if counter == count {
+            return Ok((Some(rev_reader.offset()), input_size));
         }
     }
 }
@@ -98,7 +135,7 @@ mod tests {
         let mut tmp_file = tempfile::tempfile()?;
         write!(tmp_file, "Hello world!")?;
         let (offset, size) = rfind_count(&mut tmp_file, b'l', 2, false)?;
-        assert_eq!(offset, 3);
+        assert_eq!(offset, Some(3));
         assert_eq!(size, 12);
         Ok(())
     }
@@ -109,8 +146,19 @@ mod tests {
         let mut tmp_file = tempfile::tempfile()?;
         write!(tmp_file, "1\n2\n3\n4\n5\n")?;
         let (offset, size) = rfind_count(&mut tmp_file, b'\n', 2, true)?;
-        assert_eq!(offset, 5);
+        assert_eq!(offset, Some(5));
         assert_eq!(size, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_rfind_count_not_found() -> Result<(), io::Error> {
+        use std::io::Write;
+        let mut tmp_file = tempfile::tempfile()?;
+        write!(tmp_file, "123456")?;
+        let (offset, size) = rfind_count(&mut tmp_file, b'1', 2, false)?;
+        assert_eq!(offset, None);
+        assert_eq!(size, 6);
         Ok(())
     }
 }
